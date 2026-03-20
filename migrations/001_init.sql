@@ -1,7 +1,4 @@
--- migrations/001_init.sql
--- =============================================
--- APIKeyShop - Full Schema
--- =============================================
+
 
 -- 1. CUSTOMERS
 CREATE TABLE IF NOT EXISTS customers (

@@ -1,7 +1,7 @@
-const crypto = require('crypto');
-const pool = require('../db/pool');
+const bcrypt = require('bcryptjs');
+const prisma = require('../db/prisma');
 
-// ─── Customer Auth (Bearer token = base64 email:password for simplicity) ───────
+// Customer Auth (Bearer token)
 async function requireCustomer(req, res, next) {
   const auth = req.headers['authorization'] || '';
   if (!auth.startsWith('Bearer ')) {
@@ -13,54 +13,45 @@ async function requireCustomer(req, res, next) {
     const decoded = Buffer.from(token, 'base64').toString('utf8');
     const [email, password] = decoded.split(':');
 
-    const { rows } = await pool.query(
-      'SELECT * FROM customers WHERE email = $1', [email]
-    );
-    if (!rows.length) return res.status(401).json({ error: 'Invalid credentials' });
+    const customer = await prisma.customers.findUnique({
+      where: { email }
+    });
 
-    const bcrypt = require('bcryptjs');
-    const valid = await bcrypt.compare(password, rows[0].password_hash);
+    if (!customer) return res.status(401).json({ error: 'Invalid credentials' });
+
+    const valid = await bcrypt.compare(password, customer.password_hash);
     if (!valid) return res.status(401).json({ error: 'Invalid credentials' });
 
-    req.customer = rows[0];
+    req.customer = customer;
     next();
   } catch (err) {
     return res.status(401).json({ error: 'Auth failed' });
   }
 }
 
-// ─── API Key Auth (for /v1/* endpoints) ─────────────────────────────────────
+// API Key Auth
 async function requireApiKey(req, res, next) {
   const rawKey = req.headers['x-api-key'] || '';
   if (!rawKey) return res.status(401).json({ error: 'Missing X-Api-Key header' });
 
-  // Key format: "ak_live_PREFIX_RANDOMPART"
-  // Prefix stored in DB; we hash the full key to compare
-  const prefix = rawKey.slice(0, 15); // first 16 chars are the prefix
+  const prefix = rawKey.slice(0, 15);
 
-  const { rows: keys } = await pool.query(
-    `SELECT ak.*, c.id as cust_id
-     FROM api_keys ak
-     JOIN customers c ON c.id = ak.customer_id
-     WHERE ak.key_prefix = $1 AND ak.status = 'active'`,
-    [prefix]
-  );
+  const apiKey = await prisma.api_keys.findFirst({
+    where: { key_prefix: prefix, status: 'active' }
+  });
 
-  if (!keys.length) return res.status(401).json({ error: 'Invalid API key' });
+  if (!apiKey) return res.status(401).json({ error: 'Invalid API key' });
 
-  const bcrypt = require('bcryptjs');
-  // Timing-safe: always run compare even if key not found
-  const match = await bcrypt.compare(rawKey, keys[0].key_hash);
+  const match = await bcrypt.compare(rawKey, apiKey.key_hash);
   if (!match) return res.status(401).json({ error: 'Invalid API key' });
 
-  // Update last_used_at
-  await pool.query(
-    'UPDATE api_keys SET last_used_at = NOW() WHERE id = $1',
-    [keys[0].id]
-  );
+  await prisma.api_keys.update({
+    where: { id: apiKey.id },
+    data: { last_used_at: new Date() }
+  });
 
-  req.apiKey = keys[0];
-  req.customer = { id: keys[0].customer_id };
+  req.apiKey = apiKey;
+  req.customer = { id: apiKey.customer_id };
   next();
 }
 

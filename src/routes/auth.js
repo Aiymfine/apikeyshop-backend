@@ -1,6 +1,6 @@
 const express = require('express');
 const bcrypt = require('bcryptjs');
-const pool = require('../db/pool');
+const prisma = require('../db/prisma');
 
 const router = express.Router();
 
@@ -12,27 +12,28 @@ router.post('/register', async (req, res) => {
 
   try {
     const hash = await bcrypt.hash(password, 12);
-    const { rows } = await pool.query(
-      `INSERT INTO customers (email, name, password_hash)
-       VALUES ($1, $2, $3) RETURNING id, email, name, created_at`,
-      [email, name, hash]
-    );
+
+    const customer = await prisma.customers.create({
+      data: { email, name, password_hash: hash },
+      select: { id: true, email: true, name: true, created_at: true }
+    });
 
     // Auto-subscribe to Free plan
-    await pool.query(
-      `INSERT INTO subscriptions (customer_id, plan_id)
-       SELECT $1, id FROM plans WHERE name = 'Free' LIMIT 1`,
-      [rows[0].id]
-    );
+    const freePlan = await prisma.plans.findFirst({
+      where: { name: 'Free' }
+    });
+
+    await prisma.subscriptions.create({
+      data: { customer_id: customer.id, plan_id: freePlan.id }
+    });
 
     res.status(201).json({
-      customer: rows[0],
+      customer,
       message: 'Registered and subscribed to Free plan',
-      // Token = base64(email:password) - simple for midterm
       token: Buffer.from(`${email}:${password}`).toString('base64')
     });
   } catch (err) {
-    if (err.code === '23505') return res.status(409).json({ error: 'Email already exists' });
+    if (err.code === 'P2002') return res.status(409).json({ error: 'Email already exists' });
     console.error(err);
     res.status(500).json({ error: 'Registration failed' });
   }
@@ -44,17 +45,17 @@ router.post('/login', async (req, res) => {
   if (!email || !password)
     return res.status(400).json({ error: 'email and password required' });
 
-  const { rows } = await pool.query(
-    'SELECT * FROM customers WHERE email = $1', [email]
-  );
+  const customer = await prisma.customers.findUnique({
+    where: { email }
+  });
 
-  if (!rows.length) return res.status(401).json({ error: 'Invalid credentials' });
+  if (!customer) return res.status(401).json({ error: 'Invalid credentials' });
 
-  const valid = await bcrypt.compare(password, rows[0].password_hash);
+  const valid = await bcrypt.compare(password, customer.password_hash);
   if (!valid) return res.status(401).json({ error: 'Invalid credentials' });
 
   res.json({
-    customer: { id: rows[0].id, email: rows[0].email, name: rows[0].name },
+    customer: { id: customer.id, email: customer.email, name: customer.name },
     token: Buffer.from(`${email}:${password}`).toString('base64')
   });
 });
