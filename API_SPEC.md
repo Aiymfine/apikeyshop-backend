@@ -1,12 +1,12 @@
 # API_SPEC.md — APIKeyShop
 
-Base URL: `http://localhost:3000`
+Base URL: `http://localhost:8082/v1`
 
 ---
 
 ## Auth
 
-### POST /auth/register
+### POST /v1/auth/register
 **Body:**
 ```json
 { "email": "user@example.com", "name": "Alice", "password": "secret123" }
@@ -20,7 +20,7 @@ Base URL: `http://localhost:3000`
 }
 ```
 
-### POST /auth/login
+### POST /v1/auth/login
 **Body:** `{ "email": "...", "password": "..." }`
 **Response 200:** `{ "customer": {...}, "token": "..." }`
 
@@ -28,26 +28,30 @@ Base URL: `http://localhost:3000`
 
 ## Plans
 
-### GET /plans
+### GET /v1/plans
 **Response 200:**
 ```json
 [
-  { "id": 1, "name": "Free", "req_per_min": 10, "monthly_quota": 1000, "price_cents": 0 },
+  { "id": 1, "name": "Free", "req_per_min": 3, "monthly_quota": 1000, "price_cents": 0 },
   { "id": 2, "name": "Starter", "req_per_min": 60, "monthly_quota": 50000, "price_cents": 999 },
   { "id": 3, "name": "Pro", "req_per_min": 300, "monthly_quota": 500000, "price_cents": 4999 }
 ]
 ```
 
-### POST /plans/subscribe
+### POST /v1/plans/subscribe
 **Auth:** Bearer token
 **Body:** `{ "plan_id": 2 }`
 **Response 201:** `{ "subscription": {...}, "plan": {...} }`
+
+### GET /v1/plans/me
+**Auth:** Bearer token
+**Response 200:** `{ "id": 1, "status": "active", "plans": {...} }`
 
 ---
 
 ## API Keys
 
-### POST /api-keys
+### POST /v1/api-keys
 **Auth:** Bearer token
 **Body (optional):** `{ "name": "Production Key" }`
 **Response 201:**
@@ -63,11 +67,11 @@ Base URL: `http://localhost:3000`
 ```
 > ⚠️ `raw_key` is shown ONCE. It is not stored and cannot be retrieved.
 
-### GET /api-keys
+### GET /v1/api-keys
 **Auth:** Bearer token
 **Response 200:** Array of keys (no secrets, prefix only)
 
-### DELETE /api-keys/:id
+### DELETE /v1/api-keys/:id
 **Auth:** Bearer token
 **Response 200:** `{ "message": "Key revoked", "key": {...} }`
 
@@ -79,10 +83,10 @@ Base URL: `http://localhost:3000`
 **Auth:** `X-Api-Key: <full_key>`
 **Response Headers:**
 ```
-X-RateLimit-Limit: 60
-X-RateLimit-Remaining: 59
-X-Quota-Limit: 50000
-X-Quota-Remaining: 49950
+X-RateLimit-Limit: 3
+X-RateLimit-Remaining: 2
+X-Quota-Limit: 1000
+X-Quota-Remaining: 999
 ```
 **Response 200:**
 ```json
@@ -94,11 +98,11 @@ X-Quota-Remaining: 49950
 ```
 **Response 429 (rate limit):**
 ```json
-{ "error": "Rate limit exceeded", "limit": 60, "window": "1 minute" }
+{ "error": "Rate limit exceeded", "limit": 3, "window": "1 minute" }
 ```
 **Response 429 (quota):**
 ```json
-{ "error": "Monthly quota exceeded", "quota": 50000, "used": 50000 }
+{ "error": "Monthly quota exceeded", "quota": 1000, "used": 1000 }
 ```
 
 ### GET /v1/usage/me
@@ -106,11 +110,11 @@ X-Quota-Remaining: 49950
 **Response 200:**
 ```json
 {
-  "plan": { "name": "Starter", "req_per_min": 60, "monthly_quota": 50000 },
-  "current_month": "2024-03",
-  "monthly_used": 1234,
-  "monthly_quota": 50000,
-  "daily_breakdown": [{ "date": "2024-03-15", "count": 120 }]
+  "plan": { "name": "Free", "req_per_min": 3, "monthly_quota": 1000 },
+  "current_month": "2026-03",
+  "monthly_used": 7,
+  "monthly_quota": 1000,
+  "daily_breakdown": [{ "date": "2026-03-19", "count": 7 }]
 }
 ```
 
@@ -118,7 +122,7 @@ X-Quota-Remaining: 49950
 
 ## Billing
 
-### POST /billing/run-invoice
+### POST /v1/billing/run-invoice
 **Auth:** Bearer token
 **Response 201:**
 ```json
@@ -131,8 +135,12 @@ X-Quota-Remaining: 49950
   "total_usd": "9.99"
 }
 ```
+**Response 409 (duplicate):**
+```json
+{ "error": "Invoice already exists for this period", "invoice_id": 1 }
+```
 
-### GET /billing/invoices
+### GET /v1/billing/invoices
 **Auth:** Bearer token
 **Response 200:** Array of invoices with items
 
@@ -140,7 +148,7 @@ X-Quota-Remaining: 49950
 
 ## Webhooks
 
-### POST /webhooks
+### POST /v1/webhooks
 **Auth:** Bearer token
 **Body:**
 ```json
@@ -156,13 +164,18 @@ X-Quota-Remaining: 49950
 }
 ```
 
-### POST /webhooks/test-fire
+### GET /v1/webhooks
+**Auth:** Bearer token
+**Response 200:** Array of webhook endpoints (no secrets)
+
+### POST /v1/webhooks/test-fire
 **Auth:** Bearer token
 **Body:** `{ "event_type": "invoice.issued", "payload": {} }`
+**Response 200:** `{ "message": "Event queued for delivery" }`
 
-### GET /webhooks/attempts
+### GET /v1/webhooks/attempts
 **Auth:** Bearer token
-**Response 200:** Array of delivery attempts with status, retry count, next_retry_at
+**Response 200:** Array of delivery attempts with retry status
 
 ---
 
@@ -174,6 +187,39 @@ X-Quota-Remaining: 49950
 | 401 | Missing or invalid auth |
 | 403 | Forbidden (no subscription, etc.) |
 | 404 | Resource not found |
-| 409 | Conflict (duplicate invoice, etc.) |
+| 409 | Conflict (duplicate invoice, existing email) |
 | 429 | Rate limited or quota exceeded |
 | 500 | Server error |
+
+---
+
+## Security Design
+
+### API Key Storage (Stripe-style)
+1. Generate: `ak_<prefix6bytes>_<secret24bytes>`
+2. Store: `key_prefix` (plain) + `key_hash` (bcrypt)
+3. Lookup: find by prefix → bcrypt.compare(raw, hash)
+4. **Raw key shown exactly once** at creation
+
+### Rolling Window Rate Limiting
+- Uses `usage_counters` table with 1-minute windows
+- Atomic SQL upsert — no race conditions
+- Returns `X-RateLimit-Remaining` header
+
+### Quota Enforcement
+- `usage_monthly` atomically incremented per request
+- Request denied with 429 if `count > monthly_quota`
+
+### Webhook HMAC Signing
+- Each endpoint has its own secret
+- Payload signed: `HMAC-SHA256(secret, timestamp.body)`
+- Header: `X-Webhook-Signature: t=<ts>,v1=<sig>`
+
+### Retry Backoff Schedule
+| Attempt | Delay |
+|---------|-------|
+| 1 | 1 min |
+| 2 | 5 min |
+| 3 | 15 min |
+| 4 | 60 min |
+| 5 | 180 min → exhausted |
