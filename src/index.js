@@ -2,6 +2,7 @@ require('dotenv').config();
 const express = require('express');
 const cron = require('node-cron');
 const { processRetryQueue } = require('./services/webhook');
+const prisma = require('./db/prisma');
 
 const app = express();
 app.use(express.json());
@@ -27,10 +28,23 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: 'Internal server error' });
 });
 
-// ─── Cron job ─────────────────────────────────────────────────────────────────
+// ─── Cron: process webhook retry queue every minute ──────────────────────────
 cron.schedule('* * * * *', () => {
   console.log('[cron] Processing webhook retry queue...');
   processRetryQueue();
+});
+
+// ─── Cron: check expired subscriptions daily at midnight ─────────────────────
+cron.schedule('0 0 * * *', async () => {
+  console.log('[cron] Checking expired subscriptions...');
+  const expired = await prisma.subscriptions.updateMany({
+    where: {
+      status: 'active',
+      current_period_end: { lt: new Date() }
+    },
+    data: { status: 'past_due' }
+  });
+  console.log(`[cron] Marked ${expired.count} subscriptions as past_due`);
 });
 
 const PORT = process.env.PORT || 3000;
@@ -47,7 +61,7 @@ app.listen(PORT, () => {
   console.log(`   GET  /v1/usage/me`);
   console.log(`   POST /v1/billing/run-invoice`);
   console.log(`   GET  /v1/billing/invoices`);
+  console.log(`   POST /v1/webhooks`);
   console.log(`   POST /v1/webhooks/test-fire`);
   console.log(`   GET  /v1/webhooks/attempts\n`);
 });
-
