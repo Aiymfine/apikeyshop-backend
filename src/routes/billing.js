@@ -2,6 +2,7 @@ const express = require('express');
 const prisma = require('../db/prisma');
 const { requireCustomer } = require('../middleware/auth');
 const { fireWebhookEvent } = require('../services/webhook');
+const { sendEmail } = require('../services/email');
 
 const router = express.Router();
 
@@ -9,7 +10,11 @@ const router = express.Router();
 router.post('/run-invoice', requireCustomer, async (req, res) => {
   try {
     const subscription = await prisma.subscriptions.findFirst({
-      where: { customer_id: req.customer.id, status: 'active' },
+      where: {
+        customer_id: req.customer.id,
+        platform_id: req.customer.platform_id,
+        status: 'active'
+      },
       orderBy: { created_at: 'desc' },
       include: { plans: true }
     });
@@ -21,6 +26,7 @@ router.post('/run-invoice', requireCustomer, async (req, res) => {
     const existing = await prisma.invoices.findFirst({
       where: {
         customer_id: req.customer.id,
+        platform_id: req.customer.platform_id,
         subscription_id: subscription.id,
         period_start: subscription.current_period_start,
         NOT: { status: 'void' }
@@ -38,7 +44,10 @@ router.post('/run-invoice', requireCustomer, async (req, res) => {
       .toISOString().slice(0, 7);
 
     const apiKeys = await prisma.api_keys.findMany({
-      where: { customer_id: req.customer.id },
+      where: {
+        customer_id: req.customer.id,
+        platform_id: req.customer.platform_id
+      },
       include: {
         usage_monthly: {
           where: { year_month: yearMonth }
@@ -60,6 +69,7 @@ router.post('/run-invoice', requireCustomer, async (req, res) => {
       const newInvoice = await tx.invoices.create({
         data: {
           customer_id: req.customer.id,
+          platform_id: req.customer.platform_id,
           subscription_id: subscription.id,
           status: 'issued',
           total_cents: totalCents,
@@ -95,10 +105,16 @@ router.post('/run-invoice', requireCustomer, async (req, res) => {
     });
 
     // Fire webhook
-    fireWebhookEvent(req.customer.id, 'invoice.issued', {
+    fireWebhookEvent(req.customer.id, req.customer.platform_id, 'invoice.issued', {
       invoice_id: invoice.id,
       total_cents: totalCents,
       period: yearMonth
+    }).catch(console.error);
+
+    sendEmail({
+      to: req.customer.email,
+      subject: `Invoice issued #${invoice.id}`,
+      text: `Your invoice for ${yearMonth} is issued. Total: $${(totalCents / 100).toFixed(2)}`
     }).catch(console.error);
 
     res.status(201).json({
@@ -119,7 +135,10 @@ router.post('/run-invoice', requireCustomer, async (req, res) => {
 // GET /billing/invoices
 router.get('/invoices', requireCustomer, async (req, res) => {
   const invoices = await prisma.invoices.findMany({
-    where: { customer_id: req.customer.id },
+    where: {
+      customer_id: req.customer.id,
+      platform_id: req.customer.platform_id
+    },
     include: { invoice_items: true },
     orderBy: { created_at: 'desc' }
   });

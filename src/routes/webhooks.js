@@ -16,6 +16,7 @@ router.post('/', requireCustomer, async (req, res) => {
   const endpoint = await prisma.webhook_endpoints.create({
     data: {
       customer_id: req.customer.id,
+      platform_id: req.customer.platform_id,
       url,
       secret,
       events: events || []
@@ -39,7 +40,10 @@ router.post('/', requireCustomer, async (req, res) => {
 // GET /webhooks
 router.get('/', requireCustomer, async (req, res) => {
   const endpoints = await prisma.webhook_endpoints.findMany({
-    where: { customer_id: req.customer.id },
+    where: {
+      customer_id: req.customer.id,
+      platform_id: req.customer.platform_id
+    },
     select: {
       id: true,
       url: true,
@@ -59,7 +63,7 @@ router.post('/test-fire', requireCustomer, async (req, res) => {
 
   const testPayload = payload || { test: true, timestamp: new Date().toISOString() };
 
-  await fireWebhookEvent(req.customer.id, event_type, testPayload);
+  await fireWebhookEvent(req.customer.id, req.customer.platform_id, event_type, testPayload);
 
   res.json({
     message: `Event '${event_type}' queued for delivery`,
@@ -72,7 +76,8 @@ router.get('/attempts', requireCustomer, async (req, res) => {
   const attempts = await prisma.webhook_attempts.findMany({
     where: {
       webhook_endpoints: {
-        customer_id: req.customer.id
+        customer_id: req.customer.id,
+        platform_id: req.customer.platform_id
       }
     },
     include: {

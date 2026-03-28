@@ -19,7 +19,11 @@ router.post('/', requireCustomer, async (req, res) => {
   const { name } = req.body;
 
   const subscription = await prisma.subscriptions.findFirst({
-    where: { customer_id: req.customer.id, status: 'active' }
+    where: {
+      customer_id: req.customer.id,
+      platform_id: req.customer.platform_id,
+      status: 'active'
+    }
   });
 
   if (!subscription)
@@ -31,6 +35,7 @@ router.post('/', requireCustomer, async (req, res) => {
   const apiKey = await prisma.api_keys.create({
     data: {
       customer_id: req.customer.id,
+      platform_id: req.customer.platform_id,
       key_prefix: prefix,
       key_hash: keyHash,
       name: name || null
@@ -54,7 +59,10 @@ router.post('/', requireCustomer, async (req, res) => {
 // GET /api-keys
 router.get('/', requireCustomer, async (req, res) => {
   const keys = await prisma.api_keys.findMany({
-    where: { customer_id: req.customer.id },
+    where: {
+      customer_id: req.customer.id,
+      platform_id: req.customer.platform_id
+    },
     select: {
       id: true,
       key_prefix: true,
@@ -73,7 +81,8 @@ router.delete('/:id', requireCustomer, async (req, res) => {
   const key = await prisma.api_keys.findFirst({
     where: {
       id: parseInt(req.params.id),
-      customer_id: req.customer.id
+      customer_id: req.customer.id,
+      platform_id: req.customer.platform_id
     }
   });
 

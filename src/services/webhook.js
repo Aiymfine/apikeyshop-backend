@@ -1,5 +1,6 @@
 const crypto = require('crypto');
 const prisma = require('../db/prisma');
+const { sendEmail } = require('./email');
 
 // Sign payload with HMAC-SHA256
 function signPayload(secret, payload) {
@@ -12,24 +13,45 @@ function signPayload(secret, payload) {
   return { signature: `t=${timestamp},v1=${signed}`, body };
 }
 
-// Simulate sending webhook
+// Send webhook over HTTP with HMAC signature headers.
 async function sendWebhook(endpoint, eventType, payload) {
   const { signature, body } = signPayload(endpoint.secret, payload);
-  const simulateSuccess = Math.random() > 0.3;
+  if (typeof fetch !== 'function') {
+    throw new Error('Global fetch is not available in this Node runtime');
+  }
 
-  return {
-    success: simulateSuccess,
-    status: simulateSuccess ? 200 : 500,
-    response: simulateSuccess ? 'OK' : 'Simulated server error',
-    headers_sent: { 'X-Webhook-Signature': signature }
-  };
+  try {
+    const response = await fetch(endpoint.url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Webhook-Signature': signature,
+        'X-Webhook-Event': eventType
+      },
+      body
+    });
+
+    const responseText = await response.text();
+    return {
+      success: response.ok,
+      status: response.status,
+      response: responseText || response.statusText
+    };
+  } catch (err) {
+    return {
+      success: false,
+      status: 0,
+      response: err.message || 'Network error'
+    };
+  }
 }
 
 // Fire event to all matching endpoints
-async function fireWebhookEvent(customerId, eventType, payload) {
+async function fireWebhookEvent(customerId, platformId, eventType, payload) {
   const endpoints = await prisma.webhook_endpoints.findMany({
     where: {
       customer_id: customerId,
+      platform_id: platformId,
       is_active: true
     }
   });
@@ -64,7 +86,7 @@ async function processRetryQueue() {
     },
     include: {
       webhook_endpoints: {
-        select: { url: true, secret: true }
+        select: { url: true, secret: true, customer_id: true }
       }
     },
     take: 10
@@ -106,6 +128,20 @@ async function processRetryQueue() {
         last_attempted_at: new Date()
       }
     });
+
+    if (newStatus === 'exhausted') {
+      const endpointOwner = await prisma.customers.findFirst({
+        where: { id: attempt.webhook_endpoints.customer_id }
+      });
+
+      if (endpointOwner?.email) {
+        await sendEmail({
+          to: endpointOwner.email,
+          subject: `Webhook delivery exhausted: ${attempt.event_type}`,
+          text: `Webhook delivery to ${attempt.webhook_endpoints.url} exhausted retry attempts for event ${attempt.event_type}.`
+        });
+      }
+    }
 
     console.log(`Webhook attempt #${newAttemptCount} for [${attempt.event_type}]: ${newStatus}`);
   }

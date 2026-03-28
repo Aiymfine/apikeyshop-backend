@@ -43,7 +43,11 @@ router.get('/usage/me', requireApiKey, async (req, res) => {
   });
 
   const subscription = await prisma.subscriptions.findFirst({
-    where: { customer_id: req.apiKey.customer_id, status: 'active' },
+    where: {
+      customer_id: req.apiKey.customer_id,
+      platform_id: req.apiKey.platform_id,
+      status: 'active'
+    },
     orderBy: { created_at: 'desc' },
     include: { plans: true }
   });

@@ -9,12 +9,14 @@ app.use(express.json());
 
 // ─── Routes (all under /v1) ───────────────────────────────────────────────────
 app.use('/v1/auth',      require('./routes/auth'));
+app.use('/v1/platforms', require('./routes/platforms'));
 app.use('/v1/plans',     require('./routes/plans'));
 app.use('/v1/subscribe', require('./routes/plans'));
 app.use('/v1/api-keys',  require('./routes/apikeys'));
 app.use('/v1',           require('./routes/v1'));
 app.use('/v1/billing',   require('./routes/billing'));
 app.use('/v1/webhooks',  require('./routes/webhooks'));
+app.use('/v1/admin',     require('./routes/admin'));
 
 // ─── Health check ─────────────────────────────────────────────────────────────
 app.get('/health', (req, res) => res.json({ status: 'ok', ts: new Date() }));
@@ -53,6 +55,8 @@ app.listen(PORT, () => {
   console.log(`📋 Routes:`);
   console.log(`   POST /v1/auth/register`);
   console.log(`   POST /v1/auth/login`);
+  console.log(`   POST /v1/platforms/register`);
+  console.log(`   POST /v1/platforms`);
   console.log(`   GET  /v1/plans`);
   console.log(`   POST /v1/plans/subscribe`);
   console.log(`   POST /v1/api-keys`);
@@ -63,5 +67,8 @@ app.listen(PORT, () => {
   console.log(`   GET  /v1/billing/invoices`);
   console.log(`   POST /v1/webhooks`);
   console.log(`   POST /v1/webhooks/test-fire`);
-  console.log(`   GET  /v1/webhooks/attempts\n`);
+  console.log(`   GET  /v1/webhooks/attempts`);
+  console.log(`   GET  /v1/admin/customers`);
+  console.log(`   GET  /v1/admin/revenue`);
+  console.log(`   GET  /v1/admin/usage\n`);
 });

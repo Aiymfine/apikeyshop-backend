@@ -7,7 +7,11 @@ async function rateLimitAndQuota(req, res, next) {
   try {
     // 1. Get active subscription + plan
     const subscription = await prisma.subscriptions.findFirst({
-      where: { customer_id: apiKey.customer_id, status: 'active' },
+      where: {
+        customer_id: apiKey.customer_id,
+        platform_id: apiKey.platform_id,
+        status: 'active'
+      },
       orderBy: { created_at: 'desc' },
       include: { plans: true }
     });

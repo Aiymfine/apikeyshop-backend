@@ -7,9 +7,29 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+model platforms {
+  id                Int                 @id @default(autoincrement())
+  name              String
+  slug              String              @unique
+  owner_id          Int
+  domain            String?
+  description       String?
+  is_active         Boolean             @default(true)
+  created_at        DateTime?           @default(now()) @db.Timestamptz(6)
+  customers         customers[]
+  plans             plans[]
+  api_keys          api_keys[]
+  subscriptions     subscriptions[]
+  invoices          invoices[]
+  webhook_endpoints webhook_endpoints[]
+
+  @@index([owner_id], map: "idx_platforms_owner_id")
+}
+
 model api_keys {
   id             Int              @id @default(autoincrement())
   customer_id    Int
+  platform_id    Int
   key_prefix     String
   key_hash       String
   name           String?
@@ -17,11 +37,13 @@ model api_keys {
   last_used_at   DateTime?        @db.Timestamptz(6)
   created_at     DateTime?        @default(now()) @db.Timestamptz(6)
   customers      customers        @relation(fields: [customer_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  platforms      platforms        @relation(fields: [platform_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
   usage_counters usage_counters[]
   usage_daily    usage_daily[]
   usage_monthly  usage_monthly[]
 
   @@index([key_prefix], map: "idx_api_keys_prefix")
+  @@index([platform_id], map: "idx_api_keys_platform_id")
 }
 
 model customers {
@@ -29,9 +51,12 @@ model customers {
   email             String              @unique
   name              String
   password_hash     String
+  platform_id       Int?
+  role              String              @default("customer")
   created_at        DateTime?           @default(now()) @db.Timestamptz(6)
   api_keys          api_keys[]
   invoices          invoices[]
+  platforms         platforms?          @relation(fields: [platform_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
   subscriptions     subscriptions[]
   webhook_endpoints webhook_endpoints[]
 }
@@ -49,6 +74,7 @@ model invoice_items {
 model invoices {
   id              Int             @id @default(autoincrement())
   customer_id     Int
+  platform_id     Int
   subscription_id Int?
   status          String          @default("draft")
   total_cents     Int             @default(0)
@@ -58,22 +84,28 @@ model invoices {
   created_at      DateTime?       @default(now()) @db.Timestamptz(6)
   invoice_items   invoice_items[]
   customers       customers       @relation(fields: [customer_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  platforms       platforms       @relation(fields: [platform_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
   subscriptions   subscriptions?  @relation(fields: [subscription_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
 }
 
 model plans {
   id            Int             @id @default(autoincrement())
+  platform_id   Int
   name          String
   req_per_min   Int
   monthly_quota Int
   price_cents   Int
   created_at    DateTime?       @default(now()) @db.Timestamptz(6)
+  platforms     platforms       @relation(fields: [platform_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
   subscriptions subscriptions[]
+
+  @@index([platform_id], map: "idx_plans_platform_id")
 }
 
 model subscriptions {
   id                   Int        @id @default(autoincrement())
   customer_id          Int
+  platform_id          Int
   plan_id              Int
   status               String     @default("active")
   current_period_start DateTime?  @default(now()) @db.Timestamptz(6)
@@ -81,7 +113,10 @@ model subscriptions {
   created_at           DateTime?  @default(now()) @db.Timestamptz(6)
   invoices             invoices[]
   customers            customers  @relation(fields: [customer_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  platforms            platforms  @relation(fields: [platform_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
   plans                plans      @relation(fields: [plan_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([platform_id], map: "idx_subscriptions_platform_id")
 }
 
 model usage_counters {
@@ -133,6 +168,7 @@ model webhook_attempts {
 model webhook_endpoints {
   id               Int                @id @default(autoincrement())
   customer_id      Int
+  platform_id      Int
   url              String
   secret           String
   events           String[]           @default([])
@@ -140,4 +176,7 @@ model webhook_endpoints {
   created_at       DateTime?          @default(now()) @db.Timestamptz(6)
   webhook_attempts webhook_attempts[]
   customers        customers          @relation(fields: [customer_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  platforms        platforms          @relation(fields: [platform_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([platform_id], map: "idx_webhook_endpoints_platform_id")
 }
